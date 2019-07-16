@@ -29,27 +29,30 @@ void get_host(char *host, int host_len, const char *interface_name){
         return;
     }
     struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) != -1){
-        for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next){
-            if (!ifa->ifa_addr) continue;
-            if (!(ifa->ifa_addr->sa_family==AF_INET || ifa->ifa_addr->sa_family==AF_INET6)) continue;
-            if (strcmp(ifa->ifa_name, interface_name)!=0) continue;
-            int s;
-            int ifa_addr_len;
+    if (getifaddrs(&ifaddr)==-1){
+        safe_strcpy(host, host_len, "0.0.0.0");
+        return;
+    }
 
-            ifa_addr_len=(ifa->ifa_addr->sa_family==AF_INET)
-            ?sizeof(struct sockaddr_in)
-            :sizeof(struct sockaddr_in6);
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next){
+        if (!ifa->ifa_addr) continue;
+        if (!(ifa->ifa_addr->sa_family==AF_INET || ifa->ifa_addr->sa_family==AF_INET6)) continue;
+        if (strcmp(ifa->ifa_name, interface_name)!=0) continue;
+        int s;
+        int ifa_addr_len;
 
-            s=getnameinfo(ifa->ifa_addr, ifa_addr_len, host, host_len, 0, 0, NI_NUMERICHOST);
-            host[host_len-1]=0;
-            if (s!=0) continue;
-            else {freeifaddrs(ifaddr);return;}
-        }
-        freeifaddrs(ifaddr);
+        ifa_addr_len=(ifa->ifa_addr->sa_family==AF_INET)
+        ?sizeof(struct sockaddr_in)
+        :sizeof(struct sockaddr_in6);
+
+        s=getnameinfo(ifa->ifa_addr, ifa_addr_len, host, host_len, 0, 0, NI_NUMERICHOST);
+        host[host_len-1]=0;
+        if (s!=0) continue;
+        else goto end;
     }
 
     safe_strcpy(host, host_len, "0.0.0.0");
+    end:freeifaddrs(ifaddr);
     return;
 }
 
@@ -80,32 +83,37 @@ void get_available_memory(char *mem, int memlen){
     }
 
     int memavailstrlen=strlen("MemAvailable:");
-    for(str=procmeminfo;str && *str;str=strstr(str, "\n")+1){
-        if(strncmp(str, "MemAvailable:", memavailstrlen)==0){
-            char *end_of_line=strchr(str, '\n');
-            if (!end_of_line){
-                safe_strcpy(mem, memlen, "0 kB");
-                return;
-            }
-            *end_of_line=0;
-            str+=memavailstrlen;
-            while (*str==' ') str++;
-            int strstrlen=strlen(str);
-            if (strstrlen<=6){
-                safe_strcpy(mem, memlen, "0 MB");
-                return;
-            }
-            if (strcmp(str+(strstrlen-3), " kB")!=0){
-                safe_strcpy(mem, memlen, "0 kB");
-                return;
-            }
-            *(str+(strstrlen-6))=0;
-            strstrlen=strlen(str);
-            safe_strcpy(mem, memlen, str);
-            safe_strcpy(mem+strstrlen, memlen-strstrlen, " MB");
-            break;
+    str=procmeminfo;
+    while(strncmp(str, "MemAvailable:", memavailstrlen)!=0){
+        str=strstr(str, "\n")+1;
+        if (!str || !*str){
+            safe_strcpy(mem, memlen, "0 kB");
+            return;
         }
     }
+
+    char *end_of_line=strchr(str, '\n');
+    if (!end_of_line){
+        safe_strcpy(mem, memlen, "0 kB");
+        return;
+    }
+    *end_of_line=0;
+    str+=memavailstrlen;
+    while (*str==' ') str++;
+    int strstrlen=strlen(str);
+    if (strstrlen<=6){
+        safe_strcpy(mem, memlen, "0 MB");
+        return;
+    }
+    if (strcmp(str+(strstrlen-3), " kB")!=0){
+        safe_strcpy(mem, memlen, "0 kB");
+        return;
+    }
+    *(str+(strstrlen-6))=0;
+    strstrlen=strlen(str);
+    safe_strcpy(mem, memlen, str);
+    safe_strcpy(mem+strstrlen, memlen-strstrlen, " MB");
+    return;
 }
 
 void get_datetime(char *datetime, int datetimelen){
