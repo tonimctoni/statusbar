@@ -48,11 +48,14 @@ void get_host(char *host, int host_len, const char *interface_name){
         s=getnameinfo(ifa->ifa_addr, ifa_addr_len, host, host_len, 0, 0, NI_NUMERICHOST);
         host[host_len-1]=0;
         if (s!=0) continue;
-        else goto end;
+        else break;
     }
 
-    safe_strcpy(host, host_len, "0.0.0.0");
-    end:freeifaddrs(ifaddr);
+    if(ifa==NULL){
+        safe_strcpy(host, host_len, "0.0.0.0");
+    }
+
+    freeifaddrs(ifaddr);
     return;
 }
 
