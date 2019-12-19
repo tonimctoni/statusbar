@@ -24,7 +24,7 @@ void safe_strcpy(char *dst, int dst_len, char *src){
     return;
 }
 
-void get_host(char *host, int host_len, const char *interface_name){
+void get_host(char *host, int host_len, const char *interface_name, const char *other_interface_name){
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr)==-1){
         safe_strcpy(host, host_len, "0.0.0.0");
@@ -34,7 +34,7 @@ void get_host(char *host, int host_len, const char *interface_name){
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next){
         if (!ifa->ifa_addr) continue;
         if (!(ifa->ifa_addr->sa_family==AF_INET || ifa->ifa_addr->sa_family==AF_INET6)) continue;
-        if (strcmp(ifa->ifa_name, interface_name)!=0) continue;
+        if (strcmp(ifa->ifa_name, interface_name)!=0 && strcmp(ifa->ifa_name, other_interface_name)!=0) continue;
         int s;
         int ifa_addr_len;
 
@@ -131,7 +131,7 @@ int main(){
     char str[1025];
     for(;;){
         get_available_memory(mem, 1025);
-        get_host(host, 1025, "eth0");
+        get_host(host, 1025, "eth0", "wlan0");
         get_datetime(datetime, 1025);
 
         if (strlen(mem)+strlen(host)+strlen(datetime)<1000)
