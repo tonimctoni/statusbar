@@ -25,9 +25,6 @@ void safe_strcpy(char *dst, int dst_len, char *src){
 }
 
 void get_host(char *host, int host_len, const char *interface_name){
-    if (!host){
-        return;
-    }
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr)==-1){
         safe_strcpy(host, host_len, "0.0.0.0");
@@ -60,9 +57,6 @@ void get_host(char *host, int host_len, const char *interface_name){
 }
 
 int read_file(char *buffer, int buffer_len, const char *filename){
-    if (!buffer || !filename){
-        return -1;
-    }
     int s;
     FILE *f=fopen(filename, "rb");
     if (f==0) return -1;
@@ -73,9 +67,6 @@ int read_file(char *buffer, int buffer_len, const char *filename){
 }
 
 void get_available_memory(char *mem, int memlen){
-    if (!mem){
-        return;
-    }
     char procmeminfo[1024*2];
     int s;
     char *str;
