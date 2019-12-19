@@ -48,11 +48,12 @@ void get_host(char *host, int host_len, const char *interface_name, const char *
         else break;
     }
 
+    freeifaddrs(ifaddr);
+
     if(ifa==NULL){
         safe_strcpy(host, host_len, "0.0.0.0");
     }
 
-    freeifaddrs(ifaddr);
     return;
 }
 
@@ -68,45 +69,42 @@ int read_file(char *buffer, int buffer_len, const char *filename){
 
 void get_available_memory(char *mem, int memlen){
     char procmeminfo[1024*2];
-    int s;
-    char *str;
-    s=read_file(procmeminfo, 2014*2, "/proc/meminfo");
+    const int s=read_file(procmeminfo, 2014*2, "/proc/meminfo");
     if (s<0){
         safe_strcpy(mem, memlen, "0 kB");
         return;
     }
 
-    int memavailstrlen=strlen("MemAvailable:");
-    str=procmeminfo;
-    while(strncmp(str, "MemAvailable:", memavailstrlen)!=0){
-        str=strstr(str, "\n")+1;
-        if (!str || !*str){
-            safe_strcpy(mem, memlen, "0 kB");
-            return;
-        }
-    }
-
-    char *end_of_line=strchr(str, '\n');
-    if (!end_of_line){
+    const char *const found_line_start=strstr(procmeminfo, "MemAvailable:");
+    if (found_line_start==NULL){
         safe_strcpy(mem, memlen, "0 kB");
         return;
     }
-    *end_of_line=0;
-    str+=memavailstrlen;
+
+    const char *const found_line_end=strchr(found_line_start, '\n');
+    if (found_line_end==NULL){
+        safe_strcpy(mem, memlen, "0 kB");
+        return;
+    }
+
+    if (strncmp(found_line_end-3, " kB", 3)!=0){
+        safe_strcpy(mem, memlen, "0 kB");
+        return;
+    }
+
+    const char *str=found_line_start+strlen("MemAvailable:");
     while (*str==' ') str++;
-    int strstrlen=strlen(str);
-    if (strstrlen<=6){
+    const char *const start_of_number=str;
+
+    const int number_size=found_line_end-start_of_number-3-3;
+    if (number_size<1 || number_size>100){
         safe_strcpy(mem, memlen, "0 MB");
         return;
     }
-    if (strcmp(str+(strstrlen-3), " kB")!=0){
-        safe_strcpy(mem, memlen, "0 kB");
-        return;
-    }
-    *(str+(strstrlen-6))=0;
-    strstrlen=strlen(str);
-    safe_strcpy(mem, memlen, str);
-    safe_strcpy(mem+strstrlen, memlen-strstrlen, " MB");
+
+    strncpy(mem, start_of_number, number_size);
+    strcpy(mem+number_size, " MB");
+
     return;
 }
 
