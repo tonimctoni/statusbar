@@ -24,6 +24,53 @@ void safe_strcpy(char *dst, int dst_len, char *src){
     return;
 }
 
+// void join_strs(char *dst, int dst_len, const char * const inbetween, const char **strs){
+//     *dst='\0';
+//     if (*strs==NULL){
+//         return;
+//     }
+// 
+//     const int inbetween_size=strlen(inbetween);
+//     while (*(strs+1)!=NULL){
+//         const int str_size=strlen(*strs);
+//         if (str_size+inbetween_size>=dst_len)
+//             return;
+// 
+//         strcpy(dst, *strs);
+//         strcpy(dst+str_size, inbetween);
+//         dst+=str_size+inbetween_size;
+//         dst_len+=str_size+inbetween_size;
+//         strs++;
+//     }
+// 
+//     const int str_size=strlen(*strs);
+//     if (str_size>=dst_len)
+//         return;
+//     strcpy(dst, *strs);
+// }
+
+// Not checking for dst_len>0
+void join_three_strs(char *dst, const int dst_len, const char * const inbetween, const char *const str1, const char *const str2, const char *const str3){
+    const int inbetween_size=strlen(inbetween);
+    const int str1_size=strlen(str1);
+    const int str2_size=strlen(str2);
+    const int str3_size=strlen(str3);
+
+    if (inbetween_size*2+str1_size+str2_size+str3_size+2>=dst_len){
+        *dst='\0';
+        return;
+    }
+
+    *dst=' ',                               dst+=1;
+    memcpy(dst, str1, str1_size),           dst+=str1_size;
+    memcpy(dst, inbetween, inbetween_size), dst+=inbetween_size;
+    memcpy(dst, str2, str2_size),           dst+=str2_size;
+    memcpy(dst, inbetween, inbetween_size), dst+=inbetween_size;
+    memcpy(dst, str3, str3_size),           dst+=str3_size;
+    *dst=' ',                               *(dst+1)=0;
+}
+
+
 void get_host(char *host, int host_len, const char *interface_name, const char *other_interface_name){
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr)==-1){
@@ -102,7 +149,7 @@ void get_available_memory(char *mem, int memlen){
         return;
     }
 
-    strncpy(mem, start_of_number, number_size);
+    memcpy(mem, start_of_number, number_size);
     strcpy(mem+number_size, " MB");
 
     return;
@@ -132,10 +179,7 @@ int main(){
         get_host(host, 1025, "eth0", "wlan0");
         get_datetime(datetime, 1025);
 
-        if (strlen(mem)+strlen(host)+strlen(datetime)<1000)
-            sprintf(str, " %s \xe2\x97\x8c %s \xe2\x97\x8c %s ", mem, host, datetime);
-        else
-            strcpy(str, "[string too long]");
+        join_three_strs(str, 1025, " \xe2\x97\x8c ", mem, host, datetime);
         XStoreName(dpy, DefaultRootWindow(dpy), str);
         XSync(dpy, False);
         sleep(1);
