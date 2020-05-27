@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <netdb.h>
@@ -6,7 +7,11 @@
 #include <X11/Xlib.h>
 #include <unistd.h>
 
-void safe_strcpy(char *dst, int dst_len, char *src){
+#define INTERFACE_NAME "br1"
+#define DOWN_BYTES_PATH "/sys/class/net/"INTERFACE_NAME"/statistics/rx_bytes"
+
+
+void safe_strcpy(char *dst, const int dst_len, const char *src){
     if (!dst || !src){
         return;
     }
@@ -24,7 +29,7 @@ void safe_strcpy(char *dst, int dst_len, char *src){
     return;
 }
 
-void get_host(char *host, int host_len, const char *interface_name, const char *other_interface_name){
+void get_host(char *host, const int host_len){
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr)==-1){
         safe_strcpy(host, host_len, "0.0.0.0");
@@ -34,7 +39,7 @@ void get_host(char *host, int host_len, const char *interface_name, const char *
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next){
         if (!ifa->ifa_addr) continue;
         if (!(ifa->ifa_addr->sa_family==AF_INET || ifa->ifa_addr->sa_family==AF_INET6)) continue;
-        if (strcmp(ifa->ifa_name, interface_name)!=0 && strcmp(ifa->ifa_name, other_interface_name)!=0) continue;
+        if (strcmp(ifa->ifa_name, INTERFACE_NAME)!=0) continue;
         int s;
         int ifa_addr_len;
 
@@ -57,7 +62,7 @@ void get_host(char *host, int host_len, const char *interface_name, const char *
     return;
 }
 
-int read_file(char *buffer, int buffer_len, const char *filename){
+int read_file(char *buffer, const int buffer_len, const char *filename){
     int s;
     FILE *f=fopen(filename, "rb");
     if (f==0) return -1;
@@ -69,7 +74,7 @@ int read_file(char *buffer, int buffer_len, const char *filename){
 
 void get_available_memory(char *mem, int memlen){
     char procmeminfo[1024*2];
-    const int s=read_file(procmeminfo, 2014*2, "/proc/meminfo");
+    const int s=read_file(procmeminfo, 1024*2, "/proc/meminfo");
     if (s<0){
         safe_strcpy(mem, memlen, "0 kB");
         return;
@@ -111,7 +116,46 @@ void get_available_memory(char *mem, int memlen){
     return;
 }
 
-void get_datetime(char *datetime, int datetimelen){
+long int get_net_down_bytes(){
+    char down_bytes_buffer[256];
+    const int s=read_file(down_bytes_buffer, 256, DOWN_BYTES_PATH);
+    if (s<0) return -1;
+
+    return strtol(down_bytes_buffer, NULL, 10);
+}
+
+#define ROLLING_DIFF_LEN 4
+typedef struct {
+    long int values[ROLLING_DIFF_LEN];
+    int i;
+} RollingDiff;
+RollingDiff get_net_down_internal_ra;
+
+void init_rolling_average(RollingDiff *rd, long int x){
+    rd->i=0;
+    for(int i=0;i<ROLLING_DIFF_LEN;i++)
+        rd->values[i]=x;
+}
+
+long int roll_diff(RollingDiff *rd, long int x){
+    rd->i=(rd->i+1)%ROLLING_DIFF_LEN;
+    const long int result=x-rd->values[rd->i];
+    rd->values[rd->i]=x;
+    return result;
+}
+
+void get_net_down(char *to, const int tolen){
+    const long int down_bytes=get_net_down_bytes();
+    if (down_bytes<=0){
+        safe_strcpy(to, tolen, "error");
+        return;
+    }
+
+    const long int result=roll_diff(&get_net_down_internal_ra, down_bytes)/1024/(ROLLING_DIFF_LEN);
+    snprintf(to, tolen, "%li kB/s\xe2\x96\xbc", result);
+}
+
+void get_datetime(char *datetime, const int datetimelen){
     time_t rawtime;
     struct tm *timeinfo;
     time(&rawtime);
@@ -123,17 +167,22 @@ void get_datetime(char *datetime, int datetimelen){
 
 // gcc -pedantic -Wall -O2 A.c -lX11
 // tcc A.c -lX11
+#define BUFFER_SIZE 1025
 int main(){
     Display *dpy=XOpenDisplay(NULL);
     if (!dpy) return 0;
-    char buffer[1025];
-    const char * const str_end=buffer+1025;
+
+    char buffer[BUFFER_SIZE];
+    init_rolling_average(&get_net_down_internal_ra, 0);
+    const char * const str_end=buffer+BUFFER_SIZE;
     for(;;){
         char *str=buffer;
         *str=' ', str++;
         get_available_memory(str, str_end-str),          str+=strlen(str);
         safe_strcpy(str, str_end-str, " \xe2\x97\x8c "), str+=strlen(str);
-        get_host(str, str_end-str, "eth0", "wlan0"),     str+=strlen(str);
+        get_host(str, str_end-str),                      str+=strlen(str);
+        safe_strcpy(str, str_end-str, ": "),             str+=strlen(str);
+        get_net_down(str, str_end-str),                  str+=strlen(str);
         safe_strcpy(str, str_end-str, " \xe2\x97\x8c "), str+=strlen(str);
         get_datetime(str, str_end-str),                  str+=strlen(str);
         if (str_end-str>2) *str=' ', *(str+1)='\0';
@@ -147,4 +196,3 @@ int main(){
 
     return 0;
 }
-
