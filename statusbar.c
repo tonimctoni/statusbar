@@ -7,9 +7,19 @@
 #include <X11/Xlib.h>
 #include <unistd.h>
 
-#define INTERFACE_NAME "br1"
-#define DOWN_BYTES_PATH "/sys/class/net/"INTERFACE_NAME"/statistics/rx_bytes"
+#define ENABLE_MEM 1
+#define ENABLE_BAT 1
+#define ENABLE_NET 0
 
+#if ENABLE_NET
+    #define INTERFACE_NAME "eth0"
+    #define DOWN_BYTES_PATH "/sys/class/net/"INTERFACE_NAME"/statistics/rx_bytes"
+#endif
+#if ENABLE_BAT
+    #define BAT_NAME "BAT0"
+    #define BAT_PATH_STATUS "/sys/class/power_supply/"BAT_NAME"/status"
+    #define BAT_PATH_CAPACITY "/sys/class/power_supply/"BAT_NAME"/capacity"
+#endif
 
 void safe_strcpy(char *dst, const int dst_len, const char *src){
     if (!dst || !src){
@@ -29,6 +39,17 @@ void safe_strcpy(char *dst, const int dst_len, const char *src){
     return;
 }
 
+int read_file(char *buffer, const int buffer_len, const char *filename){
+    int s;
+    FILE *f=fopen(filename, "rb");
+    if (f==0) return -1;
+    s=fread(buffer, sizeof(char), buffer_len-1, f);
+    buffer[s]=0;
+    fclose(f);
+    return s;
+}
+
+#if ENABLE_NET
 void get_host(char *host, const int host_len){
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr)==-1){
@@ -62,16 +83,47 @@ void get_host(char *host, const int host_len){
     return;
 }
 
-int read_file(char *buffer, const int buffer_len, const char *filename){
-    int s;
-    FILE *f=fopen(filename, "rb");
-    if (f==0) return -1;
-    s=fread(buffer, sizeof(char), buffer_len-1, f);
-    buffer[s]=0;
-    fclose(f);
-    return s;
+long int get_net_down_bytes(){
+    char down_bytes_buffer[256];
+    const int s=read_file(down_bytes_buffer, 256, DOWN_BYTES_PATH);
+    if (s<0) return -1;
+
+    return strtol(down_bytes_buffer, NULL, 10);
 }
 
+#define ROLLING_DIFF_LEN 4
+typedef struct {
+    long int values[ROLLING_DIFF_LEN];
+    int i;
+} RollingDiff;
+RollingDiff get_net_down_internal_ra;
+
+void init_rolling_average(RollingDiff *rd, long int x){
+    rd->i=0;
+    for(int i=0;i<ROLLING_DIFF_LEN;i++)
+        rd->values[i]=x;
+}
+
+long int roll_diff(RollingDiff *rd, long int x){
+    rd->i=(rd->i+1)%ROLLING_DIFF_LEN;
+    const long int result=x-rd->values[rd->i];
+    rd->values[rd->i]=x;
+    return result;
+}
+
+void get_net_down(char *to, const int tolen){
+    const long int down_bytes=get_net_down_bytes();
+    if (down_bytes<=0){
+        safe_strcpy(to, tolen, "error");
+        return;
+    }
+
+    const long int result=roll_diff(&get_net_down_internal_ra, down_bytes)/1024/(ROLLING_DIFF_LEN);
+    snprintf(to, tolen, "%li kB/s\xe2\x96\xbc", result);
+}
+#endif
+
+#if ENABLE_MEM
 void get_available_memory(char *mem, int memlen){
     char procmeminfo[1024*2];
     const int s=read_file(procmeminfo, 1024*2, "/proc/meminfo");
@@ -115,45 +167,25 @@ void get_available_memory(char *mem, int memlen){
 
     return;
 }
+#endif
 
-long int get_net_down_bytes(){
-    char down_bytes_buffer[256];
-    const int s=read_file(down_bytes_buffer, 256, DOWN_BYTES_PATH);
-    if (s<0) return -1;
+#if ENABLE_BAT
+void get_power_supply(char *ps, int pslen){
+    const char *psend = ps + pslen;
+    int readlen;
 
-    return strtol(down_bytes_buffer, NULL, 10);
-}
-
-#define ROLLING_DIFF_LEN 4
-typedef struct {
-    long int values[ROLLING_DIFF_LEN];
-    int i;
-} RollingDiff;
-RollingDiff get_net_down_internal_ra;
-
-void init_rolling_average(RollingDiff *rd, long int x){
-    rd->i=0;
-    for(int i=0;i<ROLLING_DIFF_LEN;i++)
-        rd->values[i]=x;
-}
-
-long int roll_diff(RollingDiff *rd, long int x){
-    rd->i=(rd->i+1)%ROLLING_DIFF_LEN;
-    const long int result=x-rd->values[rd->i];
-    rd->values[rd->i]=x;
-    return result;
-}
-
-void get_net_down(char *to, const int tolen){
-    const long int down_bytes=get_net_down_bytes();
-    if (down_bytes<=0){
-        safe_strcpy(to, tolen, "error");
+    readlen=read_file(ps, psend-ps, BAT_PATH_STATUS);
+    if (readlen<1)
         return;
-    }
+    ps+=readlen-1;
 
-    const long int result=roll_diff(&get_net_down_internal_ra, down_bytes)/1024/(ROLLING_DIFF_LEN);
-    snprintf(to, tolen, "%li kB/s\xe2\x96\xbc", result);
+    safe_strcpy(ps, psend-ps, ": "), ps+=strlen(ps);
+    readlen=read_file(ps, psend-ps, BAT_PATH_CAPACITY);
+    if (readlen<1)
+        return;
+    ps[readlen-1]='\0';
 }
+#endif
 
 void get_datetime(char *datetime, const int datetimelen){
     time_t rawtime;
@@ -173,17 +205,27 @@ int main(){
     if (!dpy) return 0;
 
     char buffer[BUFFER_SIZE];
+    #if ENABLE_NET
     init_rolling_average(&get_net_down_internal_ra, 0);
+    #endif
     const char * const str_end=buffer+BUFFER_SIZE;
     for(;;){
         char *str=buffer;
         *str=' ', str++;
+        #if ENABLE_MEM
         get_available_memory(str, str_end-str),          str+=strlen(str);
         safe_strcpy(str, str_end-str, " \xe2\x97\x8c "), str+=strlen(str);
+        #endif
+        #if ENABLE_BAT
+        get_power_supply(str, str_end-str),              str+=strlen(str);
+        safe_strcpy(str, str_end-str, " \xe2\x97\x8c "), str+=strlen(str);
+        #endif
+        #if ENABLE_NET
         get_host(str, str_end-str),                      str+=strlen(str);
         safe_strcpy(str, str_end-str, ": "),             str+=strlen(str);
         get_net_down(str, str_end-str),                  str+=strlen(str);
         safe_strcpy(str, str_end-str, " \xe2\x97\x8c "), str+=strlen(str);
+        #endif
         get_datetime(str, str_end-str),                  str+=strlen(str);
         if (str_end-str>2) *str=' ', *(str+1)='\0';
 
